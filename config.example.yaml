@@ -1,0 +1,99 @@
+# clay-sensor-monitor configuration example
+# Copy to config.yaml and customize
+
+# Home Assistant URL (can also use HA_URL env var)
+# ha_url: http://192.168.1.135:8123
+
+# Sensors to monitor
+sensors:
+  # Temperature example - alert when basement gets cold
+  - entity: sensor.basement_temperature
+    name: Basement
+    threshold:
+      direction: below
+      value: 55  # degrees
+    message: "The basement is getting cold at {value} degrees"
+    actions:
+      - type: tts
+        speaker: office
+        urgency: low
+        message: "Basement temperature alert. It's {value} degrees down there."
+      - type: notify
+        title: "🌡️ Temperature Alert"
+        message: "Basement is {value}°"
+
+  # CO2 example - alert when air quality is bad
+  - entity: sensor.basement_co2
+    name: CO2 Levels
+    threshold:
+      direction: above
+      value: 1000  # ppm
+    message: "CO2 levels are high at {value} ppm"
+    actions:
+      - type: tts
+        speaker: all
+        urgency: high
+        message: "Warning. Carbon dioxide levels are elevated. Consider opening a window."
+      - type: notify
+        title: "💨 Air Quality Alert"
+        message: "CO2 at {value} ppm"
+
+  # Humidity example - alert when too humid (mold risk)
+  - entity: sensor.basement_humidity
+    name: Humidity
+    threshold:
+      direction: above
+      value: 65  # percent
+    message: "Humidity is high at {value} percent"
+    actions:
+      - type: notify
+        title: "💧 Humidity Alert"
+        message: "Basement humidity at {value}%"
+
+  # Door/window sensor example (binary sensor)
+  - entity: sensor.front_door
+    name: Front Door
+    threshold:
+      direction: above
+      value: 0  # Treat binary as 0/1
+    message: "Front door is open!"
+    actions:
+      - type: tts
+        speaker: common
+        urgency: normal
+        message: "The front door has been opened."
+
+  # Motion sensor example
+  - entity: binary_sensor.garage_motion
+    name: Garage Motion
+    threshold:
+      direction: above
+      value: 0
+    message: "Motion detected in garage"
+    actions:
+      - type: tts
+        speaker: office
+        urgency: low
+        message: "Motion detected in the garage."
+
+  # Between range example - alert when temp is in uncomfortable range
+  # - entity: sensor.living_room_temperature
+  #   name: Living Room
+  #   threshold:
+  #     direction: between
+  #     low: 75
+  #     high: 85
+  #   message: "Living room temperature is uncomfortable at {value} degrees"
+  #   actions:
+  #     - type: notify
+  #       title: "🌡️ Temperature"
+  #       message: "Living room is {value}°"
+
+# Polling interval (seconds)
+# interval: 60
+
+# Action types:
+# - tts: Speak via clay_voice
+# - notify: Desktop notification via clay_notify  
+# - webhook: Call external URL
+# - log: Just log to console/file
