@@ -37,9 +37,13 @@ HA_TOKEN = os.environ.get('HA_TOKEN', '')
 
 # Try to load token from secrets
 if not HA_TOKEN:
-    secrets_path = Path.home() / '.secrets' / 'ha-token'
-    if secrets_path.exists():
-        HA_TOKEN = secrets_path.read_text().strip()
+    for secrets_path in (
+        Path('/Users/robb/.openclaw/workspace/.secrets/ha-token'),
+        Path.home() / '.secrets' / 'ha-token',
+    ):
+        if secrets_path.exists():
+            HA_TOKEN = secrets_path.read_text().strip()
+            break
 
 HEADERS = {
     'Authorization': f'Bearer {HA_TOKEN}',
@@ -87,11 +91,21 @@ def get_entity_state(entity_id: str) -> dict:
 
 
 def parse_value(value: str) -> float:
-    """Parse a state value to float."""
+    """Parse a state value to float.
+
+    Binary sensors report 'on'/'off' — map to 1/0 so threshold checks work.
+    """
     try:
         return float(value)
     except (ValueError, TypeError):
-        return None
+        pass
+
+    normalized = str(value).strip().lower()
+    if normalized == 'on':
+        return 1.0
+    if normalized == 'off':
+        return 0.0
+    return None
 
 
 def load_state() -> dict:
@@ -197,6 +211,16 @@ def execute_actions(alert: dict, config: dict):
             # Use clay_voice
             import subprocess
             msg = action.get('message', alert['message'])
+            # Substitute {value}/{entity}/{unit} placeholders
+            try:
+                msg = msg.format(
+                    entity=alert.get('entity', ''),
+                    value=alert.get('value', ''),
+                    unit=alert.get('unit', ''),
+                    message=alert.get('message', ''),
+                )
+            except (KeyError, IndexError, ValueError):
+                pass
             speaker = action.get('speaker', 'office')
             urgency = action.get('urgency', 'normal')
             
@@ -218,6 +242,19 @@ def execute_actions(alert: dict, config: dict):
             import subprocess
             title = action.get('title', 'Sensor Alert')
             msg = action.get('message', alert['message'])
+            try:
+                title = title.format(
+                    entity=alert.get('entity', ''),
+                    value=alert.get('value', ''),
+                    unit=alert.get('unit', ''),
+                )
+                msg = msg.format(
+                    entity=alert.get('entity', ''),
+                    value=alert.get('value', ''),
+                    unit=alert.get('unit', ''),
+                )
+            except (KeyError, IndexError, ValueError):
+                pass
             sound = action.get('sound', 'Glass')
             
             cmd = [

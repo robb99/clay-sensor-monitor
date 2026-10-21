@@ -1,99 +1,112 @@
-# clay-sensor-monitor configuration example
-# Copy to config.yaml and customize
+# clay-sensor-monitor configuration
+# Real entities verified against Home Assistant on 2026-10-21.
+# Thresholds chosen from observed baselines; tune as needed.
 
-# Home Assistant URL (can also use HA_URL env var)
-# ha_url: http://192.168.1.135:8123
-
-# Sensors to monitor
 sensors:
-  # Temperature example - alert when basement gets cold
-  - entity: sensor.basement_temperature
-    name: Basement
+  # ---- Storage / infrastructure (highest value) ----
+
+  # NVR recording storage (UniFi Protect Video Recorder Pro).
+  # NOTE: this sensor's value is stuck at 99.55% and has not updated since
+  # 2026-10-18, so it is NOT a reliable health signal on its own — the NVR
+  # runs near-full by design with rolling retention. Threshold is set very
+  # high purely as a tripwire; the real signal is recording_capacity below.
+  - entity: sensor.video_recorder_pro_storage_utilization
+    name: NVR Storage
     threshold:
-      direction: below
-      value: 55  # degrees
-    message: "The basement is getting cold at {value} degrees"
+      direction: above
+      value: 99.9
+    message: "NVR recording storage is at {value}% full. Old footage will start rotating."
     actions:
+      - type: notify
+        title: "💾 NVR Storage Alert"
+        message: "NVR storage at {value}% — recordings will roll off soon."
       - type: tts
         speaker: office
-        urgency: low
-        message: "Basement temperature alert. It's {value} degrees down there."
-      - type: notify
-        title: "🌡️ Temperature Alert"
-        message: "Basement is {value}°"
-
-  # CO2 example - alert when air quality is bad
-  - entity: sensor.basement_co2
-    name: CO2 Levels
-    threshold:
-      direction: above
-      value: 1000  # ppm
-    message: "CO2 levels are high at {value} ppm"
-    actions:
-      - type: tts
-        speaker: all
-        urgency: high
-        message: "Warning. Carbon dioxide levels are elevated. Consider opening a window."
-      - type: notify
-        title: "💨 Air Quality Alert"
-        message: "CO2 at {value} ppm"
-
-  # Humidity example - alert when too humid (mold risk)
-  - entity: sensor.basement_humidity
-    name: Humidity
-    threshold:
-      direction: above
-      value: 65  # percent
-    message: "Humidity is high at {value} percent"
-    actions:
-      - type: notify
-        title: "💧 Humidity Alert"
-        message: "Basement humidity at {value}%"
-
-  # Door/window sensor example (binary sensor)
-  - entity: sensor.front_door
-    name: Front Door
-    threshold:
-      direction: above
-      value: 0  # Treat binary as 0/1
-    message: "Front door is open!"
-    actions:
-      - type: tts
-        speaker: common
         urgency: normal
-        message: "The front door has been opened."
+        message: "NVR storage alert. Recording storage is at {value} percent full."
 
-  # Motion sensor example
-  - entity: binary_sensor.garage_motion
-    name: Garage Motion
+  # Recording capacity in seconds. 2046718s ≈ 23.7 days of footage retained.
+  # This is the real NVR health signal — alert when retention drops below 7 days.
+  - entity: sensor.video_recorder_pro_recording_capacity
+    name: NVR Recording Buffer
+    threshold:
+      direction: below
+      value: 604800
+    message: "NVR recording retention is down to {value} seconds ({unit}). Footage will roll off soon."
+    actions:
+      - type: notify
+        title: "⏳ NVR Recording Retention Low"
+        message: "Recording retention at {value}s remaining."
+      - type: tts
+        speaker: office
+        urgency: normal
+        message: "NVR recording alert. Only {value} seconds of footage remain."
+
+  # ---- Network / device health ----
+
+  # PoE switch core temperature (ran ~125F on 2026-10-21)
+  - entity: sensor.switch_pro_max_24_poe_temperature
+    name: PoE Switch Temp
+    threshold:
+      direction: above
+      value: 140
+    message: "The PoE switch is running hot at {value} degrees."
+    actions:
+      - type: notify
+        title: "🔥 PoE Switch Hot"
+        message: "PoE switch at {value}°F."
+
+  # ---- Sensor battery / device health ----
+
+  # Count of devices reporting low battery
+  - entity: sensor.low_battery_count
+    name: Low Battery Devices
     threshold:
       direction: above
       value: 0
-    message: "Motion detected in garage"
+    message: "{value} devices are reporting low battery."
     actions:
-      - type: tts
-        speaker: office
-        urgency: low
-        message: "Motion detected in the garage."
+      - type: notify
+        title: "🔋 Low Battery"
+        message: "{value} device(s) reporting low battery."
 
-  # Between range example - alert when temp is in uncomfortable range
-  # - entity: sensor.living_room_temperature
-  #   name: Living Room
-  #   threshold:
-  #     direction: between
-  #     low: 75
-  #     high: 85
-  #   message: "Living room temperature is uncomfortable at {value} degrees"
-  #   actions:
-  #     - type: notify
-  #       title: "🌡️ Temperature"
-  #       message: "Living room is {value}°"
+  # ---- Environment (device temps where no dedicated climate sensor exists) ----
+
+  - entity: sensor.0x00158d0009f5f390_device_temperature
+    name: Contact Sensor Temp
+    threshold:
+      direction: above
+      value: 120
+    message: "Contact sensor is running hot at {value} degrees."
+    actions:
+      - type: notify
+        title: "🔥 Sensor Overheating"
+        message: "Contact sensor device at {value}°F."
+
+  - entity: sensor.motion_basement_stairs_device_temperature
+    name: Basement Stairs Motion Temp
+    threshold:
+      direction: above
+      value: 120
+    message: "Basement stairs motion sensor is at {value} degrees."
+    actions:
+      - type: notify
+        title: "🔥 Basement Sensor Hot"
+        message: "Basement stairs motion sensor at {value}°F."
+
+  # ---- Doors / access ----
+
+  # contact sensor: on == open. Alerts once per open cycle (rising edge).
+  - entity: binary_sensor.garage_man_door_contact
+    name: Garage Man Door
+    threshold:
+      direction: above
+      value: 0
+    message: "The garage man door has been opened."
+    actions:
+      - type: notify
+        title: "🚪 Garage Door Opened"
+        message: "Garage man door opened."
 
 # Polling interval (seconds)
-# interval: 60
-
-# Action types:
-# - tts: Speak via clay_voice
-# - notify: Desktop notification via clay_notify  
-# - webhook: Call external URL
-# - log: Just log to console/file
+interval: 300
