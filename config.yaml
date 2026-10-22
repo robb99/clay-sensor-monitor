@@ -16,6 +16,13 @@ sensors:
       direction: above
       value: 99.9
     message: "NVR recording storage is at {value}% full. Old footage will start rotating."
+    # Alert if the NVR stops reporting for 10 minutes (reboot, network blip,
+    # integration drop). Observed 2026-10-22: it briefly went unavailable.
+    unavailable_alert_after: 600
+    unavailable_actions:
+      - type: notify
+        title: "📡 NVR Not Reporting"
+        message: "The NVR has stopped reporting sensor data."
     actions:
       - type: notify
         title: "💾 NVR Storage Alert"
@@ -32,6 +39,11 @@ sensors:
     threshold:
       direction: below
       value: 604800
+    unavailable_alert_after: 600
+    unavailable_actions:
+      - type: notify
+        title: "📡 NVR Not Reporting"
+        message: "The NVR has stopped reporting recording capacity."
     message: "NVR recording retention is down to {value} seconds ({unit}). Footage will roll off soon."
     actions:
       - type: notify
@@ -50,6 +62,11 @@ sensors:
     threshold:
       direction: above
       value: 140
+    unavailable_alert_after: 900
+    unavailable_actions:
+      - type: notify
+        title: "📡 PoE Switch Not Reporting"
+        message: "The PoE switch has stopped reporting temperature."
     message: "The PoE switch is running hot at {value} degrees."
     actions:
       - type: notify
@@ -102,6 +119,11 @@ sensors:
     threshold:
       direction: above
       value: 0
+    unavailable_alert_after: 1800
+    unavailable_actions:
+      - type: notify
+        title: "📡 Garage Sensor Not Reporting"
+        message: "The garage man door sensor has stopped reporting."
     message: "The garage man door has been opened."
     actions:
       - type: notify

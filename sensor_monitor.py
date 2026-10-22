@@ -52,6 +52,11 @@ HEADERS = {
 
 STATE_FILE = Path(__file__).parent / '.sensor_state.json'
 
+# States that mean "the device/integration is not reporting".
+# An entity that is present in the API but in one of these states is a real
+# outage signal — distinct from the entity being absent entirely.
+UNAVAILABLE_STATES = {'unavailable', 'unknown', 'none'}
+
 
 def load_config(config_path: str = None) -> dict:
     """Load configuration from YAML file."""
@@ -108,6 +113,11 @@ def parse_value(value: str) -> float:
     return None
 
 
+def is_unavailable(value: str) -> bool:
+    """True if the raw HA state means the entity is not reporting."""
+    return str(value).strip().lower() in UNAVAILABLE_STATES
+
+
 def load_state() -> dict:
     """Load previous sensor state to detect crossings."""
     if STATE_FILE.exists():
@@ -133,7 +143,17 @@ def check_thresholds(config: dict, current_states: dict) -> list:
     
     for sensor in sensors:
         entity_id = sensor['entity']
-        new_state[entity_id] = {'value': None, 'last_triggered': None}
+        prev = prev_state.get(entity_id, {}) or {}
+        # Carry forward the previous trigger marker and unit. A transient
+        # outage must NOT clear these, or the sensor re-fires its alert on
+        # recovery even though nothing actually crossed the threshold.
+        new_state[entity_id] = {
+            'value': None,
+            'last_triggered': prev.get('last_triggered'),
+            'active': prev.get('active', False),
+            'unit': prev.get('unit', ''),
+            'unavailable_since': prev.get('unavailable_since'),
+        }
         
         # Get current value
         if entity_id not in current_states:
@@ -142,6 +162,55 @@ def check_thresholds(config: dict, current_states: dict) -> list:
         
         state_obj = current_states[entity_id]
         value_str = state_obj.get('state', 'unavailable')
+        unit = state_obj.get('attributes', {}).get('unit_of_measurement', '')
+        new_state[entity_id]['unit'] = unit
+        
+        # --- Outage handling -------------------------------------------------
+        # The entity is present but not reporting (device offline, integration
+        # down, NVR rebooting...). Track how long it has been out so we can
+        # alert on a sustained outage instead of a momentary blip.
+        if is_unavailable(value_str):
+            since = new_state[entity_id].get('unavailable_since')
+            if not since:
+                since = datetime.now().isoformat()
+                new_state[entity_id]['unavailable_since'] = since
+            
+            outage_seconds = (
+                datetime.now() - datetime.fromisoformat(since)
+            ).total_seconds()
+            logger.warning(
+                f"{entity_id} is {value_str} (unavailable for {outage_seconds:.0f}s)"
+            )
+            
+            # Alert only once the outage outlasts the configured grace period.
+            # `unavailable_alert_after` is the grace period in seconds; it is
+            # absent by default (outages are not alerted on at all).
+            # A grace of 0 means "alert on the first missed reading".
+            grace = sensor.get('unavailable_alert_after')
+            if grace is not None and outage_seconds >= grace and not prev.get('unavailable_alerted'):
+                new_state[entity_id]['unavailable_alerted'] = True
+                message = (
+                    f"{sensor.get('name', entity_id)} has been unavailable "
+                    f"for {int(outage_seconds // 60)} minutes."
+                )
+                logger.info(f"ALERT: {message}")
+                alerts.append({
+                    'entity': entity_id,
+                    'value': value_str,
+                    'unit': unit,
+                    'threshold': {'value': grace, 'direction': 'unavailable'},
+                    'message': message,
+                    'actions': sensor.get('unavailable_actions', []),
+                    'name': sensor.get('name', entity_id),
+                })
+            else:
+                new_state[entity_id]['unavailable_alerted'] = prev.get('unavailable_alerted', False)
+            continue
+        
+        # Sensor is reporting again — clear outage tracking.
+        new_state[entity_id]['unavailable_since'] = None
+        new_state[entity_id]['unavailable_alerted'] = False
+        
         value = parse_value(value_str)
         
         if value is None:
@@ -150,16 +219,13 @@ def check_thresholds(config: dict, current_states: dict) -> list:
         
         new_state[entity_id]['value'] = value
         
-        # Get unit if available
-        unit = state_obj.get('attributes', {}).get('unit_of_measurement', '')
-        new_state[entity_id]['unit'] = unit
-        
         # Check thresholds
         threshold = sensor.get('threshold', {})
         direction = threshold.get('direction', 'above')  # above, below, between
         
         triggered = False
-        previous_triggered = prev_state.get(entity_id, {}).get('last_triggered')
+        previous_triggered = new_state[entity_id].get('last_triggered')
+        was_active = prev.get('active', False)
         
         if direction == 'above':
             if value > threshold['value']:
@@ -172,8 +238,13 @@ def check_thresholds(config: dict, current_states: dict) -> list:
             high = threshold['high']
             triggered = low <= value <= high
         
-        # Only alert on rising edge (not already triggered)
-        if triggered and not previous_triggered:
+        # Only alert on rising edge (not already triggered).
+        # `active` tracks whether the condition is CURRENTLY true so the
+        # alert re-arms after the value returns to normal. `last_triggered`
+        # alone would latch forever and the sensor could only ever fire once.
+        new_state[entity_id]['active'] = triggered
+        
+        if triggered and not was_active:
             new_state[entity_id]['last_triggered'] = datetime.now().isoformat()
             
             alert = {
@@ -193,8 +264,11 @@ def check_thresholds(config: dict, current_states: dict) -> list:
             alerts.append(alert)
             logger.info(f"ALERT: {alert['message']}")
         elif triggered:
-            # Already triggered, just update timestamp
+            # Already triggered, just keep the original timestamp
             new_state[entity_id]['last_triggered'] = previous_triggered
+        else:
+            # Condition cleared — allow the alert to fire again next time.
+            new_state[entity_id]['active'] = False
     
     # Save state
     save_state(new_state)
